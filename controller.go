@@ -5,34 +5,31 @@ import (
 	"fmt"
 	"time"
 
-	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/apimachinery/pkg/runtime/schema"
+	"github.com/cert-manager/cert-manager/pkg/client/clientset/versioned"
+	cmInformerV1 "github.com/cert-manager/cert-manager/pkg/client/informers/externalversions/certmanager/v1"
+	cmListerV1 "github.com/cert-manager/cert-manager/pkg/client/listers/certmanager/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
-	"k8s.io/client-go/dynamic"
-	"k8s.io/client-go/informers"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
 )
 
-type DynamicController struct {
-	clientset       dynamic.DynamicClient
-	certLister      cache.GenericLister
+type CMController struct {
+	clientset       versioned.Clientset
+	certLister      cmListerV1.CertificateLister
 	certCacheSynced cache.InformerSynced
 	queue           workqueue.RateLimitingInterface
-	certResource    schema.GroupVersionResource
 }
 
-func newDynamicController(clientset dynamic.DynamicClient, certInformer informers.GenericInformer, certResource schema.GroupVersionResource) *DynamicController {
-	c := &DynamicController{
+func newCMController(clientset versioned.Clientset, cmInformer cmInformerV1.CertificateInformer) *CMController {
+	c := &CMController{
 		clientset:       clientset,
-		certLister:      certInformer.Lister(),
-		certCacheSynced: certInformer.Informer().HasSynced,
-		queue:           workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "secret-syncer"),
-		certResource:    certResource,
+		certLister:      cmInformer.Lister(),
+		certCacheSynced: cmInformer.Informer().HasSynced,
+		queue:           workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "certificate-controller"),
 	}
 
-	certInformer.Informer().AddEventHandler(
+	cmInformer.Informer().AddEventHandler(
 		cache.ResourceEventHandlerFuncs{
 			AddFunc: c.handleCertAdd,
 			// DeleteFunc: c.handleCertDel,
@@ -41,7 +38,7 @@ func newDynamicController(clientset dynamic.DynamicClient, certInformer informer
 	return c
 }
 
-func (c *DynamicController) run(ch <-chan struct{}) {
+func (c *CMController) run(ch <-chan struct{}) {
 	if !cache.WaitForCacheSync(ch, c.certCacheSynced) {
 		fmt.Println("waiting for cache to be synced")
 	}
@@ -51,13 +48,13 @@ func (c *DynamicController) run(ch <-chan struct{}) {
 	<-ch
 }
 
-func (c *DynamicController) worker() {
+func (c *CMController) worker() {
 	for c.processNextWorkItem() {
 
 	}
 }
 
-func (c *DynamicController) processNextWorkItem() bool {
+func (c *CMController) processNextWorkItem() bool {
 	item, shutdown := c.queue.Get()
 	if shutdown {
 		return false
@@ -84,35 +81,52 @@ func (c *DynamicController) processNextWorkItem() bool {
 	return true
 }
 
-func (c *DynamicController) syncSecret(ns, name string) error {
-	// ctx := context.Background()
+func (c *CMController) syncSecret(ns, name string) error {
+	ctx := context.Background()
+	// allnamespaces: v1.NamespaceAll
 
 	fmt.Println("certificate ns: ", ns)
 	fmt.Println("certificate name: ", name)
 
-	// obj, err := c.clientset.Resource(c.certResource).List(context.Background(), v1.ListOptions{})
-
-	obj, err := c.clientset.Resource(c.certResource).Namespace(ns).Get(context.TODO(), name, v1.GetOptions{}, "")
+	cert, err := c.clientset.CertmanagerV1().Certificates(ns).Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
-		fmt.Println("abcdefg!")
+		fmt.Printf("something went wrong getting certificate: %s\n", err)
 		return err
 	}
 
-	fmt.Println("object get name", obj)
+	fmt.Println("cert ############: ", cert.Status.Conditions)
+	fmt.Println("Cerrrritificate: ", cert.GetName())
+	// fmt.Println("cert Conditions: ", cert.Status.Conditions)
 
-	// get the secret from the informer, not calling the apiserver again
-	cert, err := c.certLister.ByNamespace("sandbox").List(labels.Everything())
+	for _, v := range cert.Status.Conditions {
+		fmt.Println("cert status is: ", v.Status)
+		fmt.Println("cert reason is: ", v.Reason)
+		fmt.Println("cert type is: ", v.Type)
+		fmt.Println("cert Message is: ", v.Message)
+	}
+
+	crt, err := c.certLister.Certificates(ns).Get(name)
 	if err != nil {
-		fmt.Println("certlisteur")
+		fmt.Printf("error getting list %s \n", err)
 		return err
 	}
 
-	fmt.Println("helleu: ", cert)
+	fmt.Printf("cert from cache: %s \n ", crt.GetName())
+
+	// list, err := c.certLister.List(labels.Everything())
+	// if err != nil {
+	// 	fmt.Printf("error getting list %s \n", err)
+	// 	return err
+	// }
+	// for _, v := range list {
+	// 	fmt.Println("inside list")
+	// 	fmt.Println(v.GetName())
+	// }
 
 	return nil
 }
 
-func (c *DynamicController) handleCertAdd(obj interface{}) {
-	fmt.Println("handdleAdd called")
+func (c *CMController) handleCertAdd(obj interface{}) {
+	fmt.Println("handleCertAdd called")
 	c.queue.Add(obj)
 }

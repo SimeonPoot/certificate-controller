@@ -1,14 +1,15 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"time"
 
-	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/client-go/dynamic"
-	"k8s.io/client-go/dynamic/dynamicinformer"
 	"k8s.io/client-go/tools/clientcmd"
+
+	"github.com/cert-manager/cert-manager/pkg/client/clientset/versioned"
+	cm "github.com/cert-manager/cert-manager/pkg/client/informers/externalversions"
 )
 
 func main() {
@@ -19,20 +20,16 @@ func main() {
 		log.Panic(err.Error())
 	}
 
-	client, err := dynamic.NewForConfig(config)
+	ch := make(chan struct{})
+	cmCl, err := versioned.NewForConfig(config)
 	if err != nil {
-		log.Panic(err.Error())
+		fmt.Println("error creating certmanager config", err)
 	}
 
-	certResource := schema.GroupVersionResource{Group: "cert-manager.io", Version: "v1", Resource: "certificates"}
-
-	ch := make(chan struct{})
-	client.Resource(certResource)
-	dynInformers := dynamicinformer.NewDynamicSharedInformerFactory(client, 10*time.Minute)
-
-	c := newDynamicController(*client, dynInformers.ForResource(certResource), certResource)
-	dynInformers.Start(ch)
-	c.run(ch)
+	cmInformer := cm.NewSharedInformerFactory(cmCl, 10*time.Minute)
+	cmz := newCMController(*cmCl, cmInformer.Certmanager().V1().Certificates())
+	cmInformer.Start(ch)
+	cmz.run(ch)
 
 	// result, err := client.Resource(certResource).Namespace(v1.NamespaceAll).List(context.TODO(), metav1.ListOptions{})
 	// if err != nil {
