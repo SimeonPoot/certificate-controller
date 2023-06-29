@@ -27,8 +27,8 @@ func main() {
 	}
 
 	cmInformer := cminformer.NewSharedInformerFactory(cmCl, 10*time.Minute)
-	cmz := newCMController(*cmCl, cmInformer.Certmanager().V1().Certificates(), kubeClientset)
+	cmz := NewCMController(*cmCl, cmInformer.Certmanager().V1().Certificates())
 	cmInformer.Start(ch)
-	cmz.run(ch)
+	cmz.Run(ch)
 
 }

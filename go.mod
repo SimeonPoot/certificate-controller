@@ -4,6 +4,7 @@ go 1.20
 
 require (
 	github.com/cert-manager/cert-manager v1.12.2
+	github.com/jetstack/cert-manager v1.7.3
 	k8s.io/api v0.27.3
 	k8s.io/apimachinery v0.27.3
 	k8s.io/client-go v0.27.3
