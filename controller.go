@@ -71,7 +71,7 @@ func (c *CMController) processNextWorkItem() bool {
 		return false
 	}
 
-	err = c.syncSecret(ns, name)
+	err = c.syncCertificate(ns, name)
 	if err != nil {
 		//  retry
 		fmt.Printf("error syncing cert: %s", err.Error())
@@ -81,7 +81,7 @@ func (c *CMController) processNextWorkItem() bool {
 	return true
 }
 
-func (c *CMController) syncSecret(ns, name string) error {
+func (c *CMController) syncCertificate(ns, name string) error {
 	ctx := context.Background()
 	// allnamespaces: v1.NamespaceAll
 
@@ -96,7 +96,6 @@ func (c *CMController) syncSecret(ns, name string) error {
 
 	fmt.Println("cert ############: ", cert.Status.Conditions)
 	fmt.Println("Cerrrritificate: ", cert.GetName())
-	// fmt.Println("cert Conditions: ", cert.Status.Conditions)
 
 	for _, v := range cert.Status.Conditions {
 		fmt.Println("cert status is: ", v.Status)
@@ -112,16 +111,6 @@ func (c *CMController) syncSecret(ns, name string) error {
 	}
 
 	fmt.Printf("cert from cache: %s \n ", crt.GetName())
-
-	// list, err := c.certLister.List(labels.Everything())
-	// if err != nil {
-	// 	fmt.Printf("error getting list %s \n", err)
-	// 	return err
-	// }
-	// for _, v := range list {
-	// 	fmt.Println("inside list")
-	// 	fmt.Println(v.GetName())
-	// }
 
 	return nil
 }

@@ -9,7 +9,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/cert-manager/cert-manager/pkg/client/clientset/versioned"
-	cm "github.com/cert-manager/cert-manager/pkg/client/informers/externalversions"
+	cminformer "github.com/cert-manager/cert-manager/pkg/client/informers/externalversions"
 )
 
 func main() {
@@ -26,16 +26,9 @@ func main() {
 		fmt.Println("error creating certmanager config", err)
 	}
 
-	cmInformer := cm.NewSharedInformerFactory(cmCl, 10*time.Minute)
-	cmz := newCMController(*cmCl, cmInformer.Certmanager().V1().Certificates())
+	cmInformer := cminformer.NewSharedInformerFactory(cmCl, 10*time.Minute)
+	cmz := newCMController(*cmCl, cmInformer.Certmanager().V1().Certificates(), kubeClientset)
 	cmInformer.Start(ch)
 	cmz.run(ch)
-
-	// result, err := client.Resource(certResource).Namespace(v1.NamespaceAll).List(context.TODO(), metav1.ListOptions{})
-	// if err != nil {
-	// 	panic(err)
-	// }
-
-	// fmt.Println(result)
 
 }
