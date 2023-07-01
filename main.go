@@ -51,9 +51,9 @@ func main() {
 
 	// TODO: resync every 10minutes (this doesn't work!)
 	cmInformer := cminformer.NewSharedInformerFactory(clientset, 10*time.Minute)
-	cController := ctrl.NewCertController(*clientset, cmInformer.Certmanager().V1().Certificates(), cOpts, log)
+	controller := ctrl.NewController(*clientset, cmInformer.Certmanager().V1().Certificates(), cOpts, log)
 	cmInformer.Start(ch)
-	cController.Run(ch)
+	controller.Run(ch)
 
 }
 

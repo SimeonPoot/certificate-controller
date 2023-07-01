@@ -23,7 +23,7 @@ type CertControllerOptions struct {
 	DryRun  bool
 }
 
-type CertController struct {
+type Controller struct {
 	clientset       versioned.Clientset
 	certLister      cmListerV1.CertificateLister
 	certCacheSynced cache.InformerSynced
@@ -32,8 +32,8 @@ type CertController struct {
 	Lg *logrus.Logger
 }
 
-func NewCertController(clientset versioned.Clientset, cmInformer cmInformerV1.CertificateInformer, cOpts CertControllerOptions, log *logrus.Logger) *CertController {
-	c := &CertController{
+func NewController(clientset versioned.Clientset, cmInformer cmInformerV1.CertificateInformer, cOpts CertControllerOptions, log *logrus.Logger) *Controller {
+	c := &Controller{
 		clientset:             clientset,
 		certLister:            cmInformer.Lister(),
 		certCacheSynced:       cmInformer.Informer().HasSynced,
@@ -51,7 +51,7 @@ func NewCertController(clientset versioned.Clientset, cmInformer cmInformerV1.Ce
 	return c
 }
 
-func (c *CertController) Run(ch <-chan struct{}) {
+func (c *Controller) Run(ch <-chan struct{}) {
 	if !cache.WaitForCacheSync(ch, c.certCacheSynced) {
 		c.Lg.Info("waiting for cache to be synced")
 	}
@@ -61,13 +61,13 @@ func (c *CertController) Run(ch <-chan struct{}) {
 	<-ch
 }
 
-func (c *CertController) worker() {
+func (c *Controller) worker() {
 	for c.processNextWorkItem() {
 
 	}
 }
 
-func (c *CertController) processNextWorkItem() bool {
+func (c *Controller) processNextWorkItem() bool {
 	item, shutdown := c.queue.Get()
 	if shutdown {
 		return false
@@ -96,7 +96,7 @@ func (c *CertController) processNextWorkItem() bool {
 
 // syncHandler compares the actual state with the desired, and attempts to
 // converge the two.
-func (c *CertController) syncHandler(ns, name string) error {
+func (c *Controller) syncHandler(ns, name string) error {
 	ctx := context.Background()
 	// allnamespaces: v1.NamespaceAll
 
@@ -149,7 +149,7 @@ func (c *CertController) syncHandler(ns, name string) error {
 	return nil
 }
 
-func (c *CertController) handleCertAdd(obj interface{}) {
+func (c *Controller) handleCertAdd(obj interface{}) {
 	c.Lg.Info("handleCertAdd called")
 	c.queue.Add(obj)
 }
