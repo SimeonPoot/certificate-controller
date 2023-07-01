@@ -1,4 +1,4 @@
-package main
+package controllers
 
 import (
 	"context"
@@ -94,22 +94,6 @@ func (c *CMController) syncHandler(ns, name string) error {
 
 	fmt.Println("certificate ns: ", ns)
 	fmt.Println("certificate name: ", name)
-
-	// Calling the kubeAPI, retrieving this certificate
-	// cert, err := c.clientset.CertmanagerV1().Certificates(ns).Get(ctx, name, metav1.GetOptions{})
-	// if err != nil {
-	// 	fmt.Printf("something went wrong getting certificate: %s\n", err)
-	// 	return err
-	// }
-
-	// for _, v := range cert.Status.Conditions {
-	// 	if v.Status != "True" {
-	// 		fmt.Println("status is not TRUE")
-	// 		fmt.Println(cert.GetName())
-	// 		fmt.Println("cert Message is: ", v.Message)
-	// 	}
-
-	// }
 
 	// Calling the certificate object from informers cache
 	crt, err := c.certLister.Certificates(ns).Get(name)
