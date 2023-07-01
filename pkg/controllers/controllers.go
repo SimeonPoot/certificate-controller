@@ -3,6 +3,7 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -11,24 +12,34 @@ import (
 	"github.com/cert-manager/cert-manager/pkg/client/clientset/versioned"
 	cmInformerV1 "github.com/cert-manager/cert-manager/pkg/client/informers/externalversions/certmanager/v1"
 	cmListerV1 "github.com/cert-manager/cert-manager/pkg/client/listers/certmanager/v1"
+	"github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
 )
 
-type CMController struct {
+type CertControllerOptions struct {
+	Trigger string
+	DryRun  bool
+}
+
+type CertController struct {
 	clientset       versioned.Clientset
 	certLister      cmListerV1.CertificateLister
 	certCacheSynced cache.InformerSynced
 	queue           workqueue.RateLimitingInterface
+	CertControllerOptions
+	Lg *logrus.Logger
 }
 
-func NewCMController(clientset versioned.Clientset, cmInformer cmInformerV1.CertificateInformer) *CMController {
-	c := &CMController{
-		clientset:       clientset,
-		certLister:      cmInformer.Lister(),
-		certCacheSynced: cmInformer.Informer().HasSynced,
-		queue:           workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "certificate-controller"),
+func NewCertController(clientset versioned.Clientset, cmInformer cmInformerV1.CertificateInformer, cOpts CertControllerOptions, log *logrus.Logger) *CertController {
+	c := &CertController{
+		clientset:             clientset,
+		certLister:            cmInformer.Lister(),
+		certCacheSynced:       cmInformer.Informer().HasSynced,
+		queue:                 workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "certificate-controller"),
+		CertControllerOptions: cOpts,
+		Lg:                    log,
 	}
 
 	cmInformer.Informer().AddEventHandler(
@@ -40,9 +51,9 @@ func NewCMController(clientset versioned.Clientset, cmInformer cmInformerV1.Cert
 	return c
 }
 
-func (c *CMController) Run(ch <-chan struct{}) {
+func (c *CertController) Run(ch <-chan struct{}) {
 	if !cache.WaitForCacheSync(ch, c.certCacheSynced) {
-		fmt.Println("waiting for cache to be synced")
+		c.Lg.Info("waiting for cache to be synced")
 	}
 
 	wait.Until(c.worker, 1*time.Second, ch)
@@ -50,13 +61,13 @@ func (c *CMController) Run(ch <-chan struct{}) {
 	<-ch
 }
 
-func (c *CMController) worker() {
+func (c *CertController) worker() {
 	for c.processNextWorkItem() {
 
 	}
 }
 
-func (c *CMController) processNextWorkItem() bool {
+func (c *CertController) processNextWorkItem() bool {
 	item, shutdown := c.queue.Get()
 	if shutdown {
 		return false
@@ -64,19 +75,19 @@ func (c *CMController) processNextWorkItem() bool {
 	defer c.queue.Forget(item)
 	key, err := cache.MetaNamespaceKeyFunc(item)
 	if err != nil {
-		fmt.Printf("error getting key from cache %s\n", err)
+		c.Lg.Errorf("error getting key from cache %s\n", err)
 		return false
 	}
 	ns, name, err := cache.SplitMetaNamespaceKey(key)
 	if err != nil {
-		fmt.Printf("error splitting key into namespace + name %s\n", err)
+		c.Lg.Errorf("error splitting key into namespace + name %s\n", err)
 		return false
 	}
 
 	err = c.syncHandler(ns, name)
 	if err != nil {
 		//  retry
-		fmt.Printf("error syncing cert: %s", err.Error())
+		c.Lg.Errorf("error syncing cert: %s", err.Error())
 		return false
 	}
 
@@ -85,7 +96,7 @@ func (c *CMController) processNextWorkItem() bool {
 
 // syncHandler compares the actual state with the desired, and attempts to
 // converge the two.
-func (c *CMController) syncHandler(ns, name string) error {
+func (c *CertController) syncHandler(ns, name string) error {
 	ctx := context.Background()
 	// allnamespaces: v1.NamespaceAll
 
@@ -101,42 +112,44 @@ func (c *CMController) syncHandler(ns, name string) error {
 		// The certificate resource may no longer exist, in which case we stop
 		// processing.
 		if errors.IsNotFound(err) {
-			fmt.Printf("did not find cert %s / %s", ns, name)
+			c.Lg.Infof("did not find cert %s / %s", ns, name)
 			return nil
 		}
 		return err
 	}
 
-	for _, v := range crt.Status.Conditions {
-		if v.Reason != "Ready" {
-			fmt.Printf("deleting certificate: %s / %s", ns, name)
-		}
+	if crt.Status.Conditions == nil {
+		// FIXME: BackOff retry? >> an option how much backoff ?
+		c.Lg.Info("probably just created: ", crt.GetName())
+		// return fmt.Errorf("nil, we need to retry")
+	}
 
+	for _, v := range crt.Status.Conditions {
 		if v.Status != "True" {
-			fmt.Println("status is not TRUE")
-			fmt.Println(crt.GetName())
-			fmt.Println("cert Message is: ", v.Message)
+			c.Lg.Infof("status is not True for cert %s, msg is: %s", crt.GetName(), v.Message)
 
 			// take some time checking if a cert needs to be deleted,
 			// sometimes a cert needs a few seconds to come
 
-			c.clientset.CertmanagerV1().Certificates(ns).Delete(ctx, name, metav1.DeleteOptions{})
-			if err != nil {
-				fmt.Println("something went wrong deleting secret")
-				return err
+			if !c.DryRun && strings.Contains(v.Message, c.Trigger) {
+				c.clientset.CertmanagerV1().Certificates(ns).Delete(ctx, name, metav1.DeleteOptions{})
+				if err != nil {
+					c.Lg.Errorf("something went wrong deleting certificate: %s/%s", ns, name)
+					return err
+				}
 			}
-			fmt.Printf("deleted certificate: %s / %s", ns, name)
+
+			c.Lg.Infof("deleted certificate: %s/%s", ns, name)
 
 		}
 	}
 
-	fmt.Printf("cert from cache: %s \n ", crt.GetName())
-	fmt.Println(crt.Status)
+	c.Lg.Info(crt.Status)
 
 	return nil
 }
 
-func (c *CMController) handleCertAdd(obj interface{}) {
-	fmt.Println("handleCertAdd called")
+func (c *CertController) handleCertAdd(obj interface{}) {
+	c.Lg.Info("handleCertAdd called")
 	c.queue.Add(obj)
 }
